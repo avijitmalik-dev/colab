@@ -1,64 +1,52 @@
 import React, { useEffect, useRef } from "react";
-import { EditorView, basicSetup } from "@codemirror/basic-setup";
+import io from "socket.io-client";
+import { EditorView } from "@codemirror/view";
+import { basicSetup } from "@codemirror/basic-setup";
 import { EditorState } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
-import { ACTIONS } from "../Action";
+import { oneDark } from "@codemirror/theme-one-dark";
 
-function Editor({ socketRef, roomId, onCodeChange }) {
+// Ensure the socket URL matches your server setup
+const socket = io('http://localhost:8000');
+
+const Editor = ({ roomId }) => {
   const editorRef = useRef(null);
 
   useEffect(() => {
-    const startState = EditorState.create({
+    if (!editorRef.current) return;
+
+    const state = EditorState.create({
       doc: "",
       extensions: [
         basicSetup,
-        oneDark,
         javascript(),
+        oneDark,
         EditorView.updateListener.of((update) => {
-          if (update.changes) {
-            const code = update.state.doc.toString();
-            onCodeChange(code);
-            if (update.transactions[0].isUserEvent("input.type")) {
-              socketRef.current.emit(ACTIONS.CODE_CHANGE, {
-                roomId,
-                code,
-              });
-            }
+          if (update.docChanged) {
+            socket.emit('CODE_CHANGE', { roomId, code: update.state.doc.toString() });
           }
         }),
       ],
     });
 
-    const editor = new EditorView({
-      state: startState,
+    const view = new EditorView({
+      state,
       parent: editorRef.current,
     });
 
-    return () => {
-      editor.destroy();
-    };
-  }, [onCodeChange, roomId, socketRef]);
-
-  useEffect(() => {
-    if (socketRef.current) {
-      socketRef.current.on(ACTIONS.CODE_CHANGE, ({ code }) => {
-        if (code !== null) {
-          const currentDoc = editorRef.current.editorView.state.doc.toString();
-          if (code !== currentDoc) {
-            editorRef.current.editorView.dispatch({
-              changes: { from: 0, to: currentDoc.length, insert: code },
-            });
-          }
-        }
+    socket.on('CODE_CHANGE', ({ code }) => {
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: code },
       });
-    }
-    return () => {
-      socketRef.current.off(ACTIONS.CODE_CHANGE);
-    };
-  }, [socketRef]);
+    });
 
-  return <div ref={editorRef} className="h-96 w-full"></div>;
-}
+    return () => {
+      view.destroy();
+      socket.off('CODE_CHANGE');
+    };
+  }, [roomId]);
+
+  return <div ref={editorRef} style={{ height: "100%" }}></div>;
+};
 
 export default Editor;
